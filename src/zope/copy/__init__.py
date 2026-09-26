@@ -11,6 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+import sys
 import tempfile
 
 from zope.copy import interfaces
@@ -20,8 +21,35 @@ from zope.copy._compat import _get_obj
 from zope.copy._compat import _get_pid
 
 
+# ``pickle`` walks the object graph recursively, using a couple of stack
+# frames per referenced object. Large containers (for instance a BTree
+# holding several thousand items, which internally chains together many
+# small buckets) can therefore blow Python's default recursion limit even
+# though nothing about the data is conceptually "deep". Rather than guess
+# a single margin that is enough for every graph, ``clone`` retries with a
+# progressively higher limit whenever it runs into a RecursionError, up to
+# this hard ceiling, and always restores the original limit afterwards.
+_MAX_RECURSION_LIMIT = 200000
+
+
 def clone(obj):
     """Clone an object by pickling and unpickling it"""
+    old_limit = sys.getrecursionlimit()
+    limit = old_limit
+    try:
+        while True:
+            try:
+                return _clone(obj)
+            except RecursionError:
+                if limit >= _MAX_RECURSION_LIMIT:
+                    raise
+                limit = min(limit * 2, _MAX_RECURSION_LIMIT)
+                sys.setrecursionlimit(limit)
+    finally:
+        sys.setrecursionlimit(old_limit)
+
+
+def _clone(obj):
     with tempfile.TemporaryFile() as tmp:
         persistent = CopyPersistent(obj)
 

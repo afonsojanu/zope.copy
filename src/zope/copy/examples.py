@@ -50,3 +50,14 @@ class Other:
     root = object()  # immutable
     __name__ = property(lambda _self: 'something')
     __parent__ = property(lambda self: self.__class__.root)
+
+
+class Node:
+    """A minimal link in a chain of objects, used to build long, thin
+    object graphs (as a stand-in for something like a large BTree's
+    chain of buckets) for testing how ``clone`` copes with pickling
+    them.
+    """
+
+    def __init__(self, next=None):
+        self.next = next

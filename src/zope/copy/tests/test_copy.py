@@ -82,6 +82,38 @@ class Test_clone(_Base, unittest.TestCase):
         self.assertEqual(c.subobject(), 3)
         self.assertEqual(o.subobject(), 3)
 
+    def test_deep_object_graph_does_not_hit_recursion_limit(self):
+        # https://github.com/zopefoundation/zope.copy/issues/8
+        # Pickling a long chain of small objects (the kind of structure
+        # a large BTree ends up producing) can need many more stack
+        # frames than the ambient recursion limit allows for. clone()
+        # should cope with this instead of letting a bare
+        # RecursionError escape, and it should leave the recursion
+        # limit exactly as it found it.
+        import sys
+
+        from zope.copy.examples import Node
+
+        old_limit = sys.getrecursionlimit()
+        self.addCleanup(sys.setrecursionlimit, old_limit)
+        sys.setrecursionlimit(50)
+
+        head = None
+        for _ in range(400):
+            head = Node(head)
+
+        copied = self._callFUT(head)
+
+        self.assertIsNot(copied, head)
+        count = 0
+        node = copied
+        while node is not None:
+            count += 1
+            node = node.next
+        self.assertEqual(count, 400)
+        # The temporary bump to the recursion limit must not leak out.
+        self.assertEqual(sys.getrecursionlimit(), 50)
+
     def test_subobject_w_post_copy_hook(self):
         from zope.location.location import Location
         from zope.location.location import locate

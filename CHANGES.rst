@@ -5,7 +5,11 @@
 6.1 (unreleased)
 ================
 
-- Nothing changed yet.
+- Fix ``clone`` raising a ``RecursionError`` when copying large object
+  graphs, such as BTree containers with several thousand items, by
+  temporarily raising the recursion limit for the duration of the
+  pickling and unpickling calls.
+  (`#8 <https://github.com/zopefoundation/zope.copy/issues/8>`_)
 
 
 6.0 (2025-09-12)
