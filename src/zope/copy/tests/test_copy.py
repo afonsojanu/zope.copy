@@ -114,6 +114,30 @@ class Test_clone(_Base, unittest.TestCase):
         # The temporary bump to the recursion limit must not leak out.
         self.assertEqual(sys.getrecursionlimit(), 50)
 
+    def test_recursion_limit_exhausted_reraises(self):
+        # If a graph is too deep to clone even at the retry ceiling,
+        # clone() must give up and let the RecursionError propagate
+        # instead of retrying forever, and it must still restore the
+        # original recursion limit on the way out.
+        import sys
+        from unittest import mock
+
+        from zope.copy.examples import Node
+
+        old_limit = sys.getrecursionlimit()
+        self.addCleanup(sys.setrecursionlimit, old_limit)
+        sys.setrecursionlimit(50)
+
+        head = None
+        for _ in range(400):
+            head = Node(head)
+
+        with mock.patch('zope.copy._MAX_RECURSION_LIMIT', 50):
+            with self.assertRaises(RecursionError):
+                self._callFUT(head)
+
+        self.assertEqual(sys.getrecursionlimit(), 50)
+
     def test_subobject_w_post_copy_hook(self):
         from zope.location.location import Location
         from zope.location.location import locate
@@ -168,6 +192,17 @@ class Test_copy(_Base, unittest.TestCase):
         self.assertIsInstance(copied, Demo)
         self.assertEqual(copied.__parent__, None)
         self.assertEqual(copied.__name__, None)
+
+    def test_wo_parent_or_name_set(self):
+        # Nothing to clear when the object never had __parent__ or
+        # __name__ set in the first place.
+        from zope.copy.examples import Demo
+        demo = Demo()
+        copied = self._callFUT(demo)
+        self.assertIsNot(copied, demo)
+        self.assertIsInstance(copied, Demo)
+        self.assertIsNone(getattr(copied, '__parent__', None))
+        self.assertIsNone(getattr(copied, '__name__', None))
 
     def test_w_readonly___parent___and___name__(self):
         global Foo  # make unpicklable
