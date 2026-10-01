@@ -115,28 +115,26 @@ class Test_clone(_Base, unittest.TestCase):
         self.assertEqual(sys.getrecursionlimit(), 50)
 
     def test_recursion_limit_exhausted_reraises(self):
-        # If a graph is too deep to clone even at the retry ceiling,
-        # clone() must give up and let the RecursionError propagate
-        # instead of retrying forever, and it must still restore the
-        # original recursion limit on the way out.
+        # If _clone keeps hitting a RecursionError no matter how high
+        # the retry loop raises the limit, clone() must give up once
+        # the ceiling is reached and let the RecursionError propagate,
+        # and it must still restore the original recursion limit on
+        # the way out. Forcing the RecursionError through a mock,
+        # rather than via a real object graph and a tiny recursion
+        # limit, keeps this independent of how deep pickling of a
+        # given structure actually nests on a given Python version.
         import sys
         from unittest import mock
 
-        from zope.copy.examples import Node
-
         old_limit = sys.getrecursionlimit()
         self.addCleanup(sys.setrecursionlimit, old_limit)
-        sys.setrecursionlimit(50)
 
-        head = None
-        for _ in range(400):
-            head = Node(head)
+        with mock.patch('zope.copy._MAX_RECURSION_LIMIT', old_limit + 5):
+            with mock.patch('zope.copy._clone', side_effect=RecursionError):
+                with self.assertRaises(RecursionError):
+                    self._callFUT(object())
 
-        with mock.patch('zope.copy._MAX_RECURSION_LIMIT', 50):
-            with self.assertRaises(RecursionError):
-                self._callFUT(head)
-
-        self.assertEqual(sys.getrecursionlimit(), 50)
+        self.assertEqual(sys.getrecursionlimit(), old_limit)
 
     def test_subobject_w_post_copy_hook(self):
         from zope.location.location import Location
