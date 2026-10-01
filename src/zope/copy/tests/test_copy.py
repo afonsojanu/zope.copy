@@ -87,22 +87,45 @@ class Test_clone(_Base, unittest.TestCase):
         # Pickling a long chain of small objects (the kind of structure
         # a large BTree ends up producing) can need many more stack
         # frames than the ambient recursion limit allows for. clone()
-        # should cope with this instead of letting a bare
+        # should retry with a higher limit instead of letting a bare
         # RecursionError escape, and it should leave the recursion
-        # limit exactly as it found it.
+        # limit exactly as it found it once it succeeds.
+        #
+        # How many Python-level frames a given object graph actually
+        # needs to pickle isn't stable across interpreter versions, so
+        # rather than lean on a real graph plus a very low
+        # sys.setrecursionlimit() to force the first couple of
+        # attempts to overflow, this forces exactly that through a
+        # mock and lets the real _clone do the work only once the
+        # retry loop would actually be expected to succeed.
         import sys
+        from unittest import mock
 
+        from zope.copy import _clone as real_clone
         from zope.copy.examples import Node
 
         old_limit = sys.getrecursionlimit()
         self.addCleanup(sys.setrecursionlimit, old_limit)
-        sys.setrecursionlimit(50)
+
+        limits_seen = []
+
+        def flaky_clone(obj):
+            limits_seen.append(sys.getrecursionlimit())
+            if len(limits_seen) < 3:
+                raise RecursionError
+            return real_clone(obj)
 
         head = None
         for _ in range(400):
             head = Node(head)
 
-        copied = self._callFUT(head)
+        with mock.patch('zope.copy._clone', side_effect=flaky_clone):
+            copied = self._callFUT(head)
+
+        # Two overflows, then success, each at a strictly higher limit.
+        self.assertEqual(len(limits_seen), 3)
+        self.assertLess(limits_seen[0], limits_seen[1])
+        self.assertLess(limits_seen[1], limits_seen[2])
 
         self.assertIsNot(copied, head)
         count = 0
@@ -112,7 +135,7 @@ class Test_clone(_Base, unittest.TestCase):
             node = node.next
         self.assertEqual(count, 400)
         # The temporary bump to the recursion limit must not leak out.
-        self.assertEqual(sys.getrecursionlimit(), 50)
+        self.assertEqual(sys.getrecursionlimit(), old_limit)
 
     def test_recursion_limit_exhausted_reraises(self):
         # If _clone keeps hitting a RecursionError no matter how high
